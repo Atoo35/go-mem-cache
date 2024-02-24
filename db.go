@@ -142,10 +142,32 @@ func (db *DB[T]) Size() int64 {
 func (db *DB[T]) set(key string, value T, priority, expiry int64) {
 	db.mu.Lock()
 
+	if db.key_eviction_policy == types.KeyEvictionPolicy("LRU") {
+		db.applyLRUPolicy(key, value, priority, expiry)
+	}
+
+	db.mu.Unlock()
+}
+
+func (db *DB[T]) size() int64 {
+	db.mu.RLock()
+	size := len(db.data)
+	db.mu.RUnlock()
+	return int64(size)
+}
+
+func isValidEvictionPolicy(evictionPolicy types.KeyEvictionPolicy) bool {
+	switch evictionPolicy {
+	case constants.LRUEviction:
+		return true
+	}
+	return false
+}
+
+func (db *DB[T]) applyLRUPolicy(key string, value T, priority, expiry int64) {
 	// Check if the cache exceeds its capacity
 	if len(db.data) >= int(db.capacity) {
 		// Find the item with the lowest priority
-		// fmt.Println("setting key:", key, "value:", value, "priority:", priority, "expiry:", expiry)
 		lowestPriorityItem := db.pq[0]
 		lowestPriorityItems := make([]types.Item[T], 0)
 		for _, item := range db.pq {
@@ -153,7 +175,7 @@ func (db *DB[T]) set(key string, value T, priority, expiry int64) {
 				lowestPriorityItems = append(lowestPriorityItems, item) // Assign the address of item to lruItem
 			}
 		}
-		// fmt.Println("lowerstItems", lowestPriorityItems)
+
 		// Find the least recently used item
 		lruItem := lowestPriorityItems[0]
 		if len(lowestPriorityItems) > 1 {
@@ -163,8 +185,6 @@ func (db *DB[T]) set(key string, value T, priority, expiry int64) {
 				}
 			}
 		}
-
-		// fmt.Println("lruItem:", lruItem.Key, "lruItem.Expiry:", lruItem.Expiry, "lruItem.Priority:", lruItem.Priority, "lruItem.Value:", lruItem.Value)
 
 		// Remove the least recently used item
 		heap.Remove(&db.pq, lruItem.Index)
@@ -182,20 +202,4 @@ func (db *DB[T]) set(key string, value T, priority, expiry int64) {
 	// Add the new item to the priority queue and the item map
 	heap.Push(&db.pq, newItem)
 	db.data[key] = *newItem
-	db.mu.Unlock()
-}
-
-func (db *DB[T]) size() int64 {
-	db.mu.RLock()
-	size := len(db.data)
-	db.mu.RUnlock()
-	return int64(size)
-}
-
-func isValidEvictionPolicy(evictionPolicy types.KeyEvictionPolicy) bool {
-	switch evictionPolicy {
-	case constants.LRUEviction:
-		return true
-	}
-	return false
 }
